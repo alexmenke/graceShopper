@@ -16,13 +16,12 @@ async function createPromoCode({ productId, code, flatDiscount, percentDiscount 
     }
 };
 
-async function getAllPromoCodes(id) {
+async function getAllPromoCodes() {
     try {
-        const {rows: [promo_codes]} = await client.query(`
+        const {rows: promo_codes} = await client.query(`
         SELECT *
-        FROM promo_codes
-        WHERE id=$1;
-        `, [id]);
+        FROM promo_codes;
+        `);
 
         return promo_codes;
     } catch (error) {
@@ -31,25 +30,28 @@ async function getAllPromoCodes(id) {
     }
 };
 
-async function updatePromoCode({id, ...fields}) {
-    const { update } = fields;
-
-    const setString = Object.keys(fields)
-    .map((key, index) => `"${key}"=$${index + 1}`)
-    .join(", ");
-
+async function updatePromoCode({id, ...updatedPromoCode}) {
     try {
-        if(setString.length > 0){
-            await client.query(`
-            UPDATE promo_codes
-            SET ${setString}
-            WHERE id=${id}
-            RETURNING *;
-            `, Object.values(fields));
-        }
-        if(update === undefined){
-            return await getAllPromoCodes(id);
-        }
+        const setString = Object.keys(updatedPromoCode)
+        .map((key, index) => `"${key}"=$${index + 1}`)
+        .join(', ');
+  
+      if (setString.length) {
+        const {
+          rows: [promoCode],
+        } = await client.query(
+          `
+        UPDATE promo_codes
+        SET ${setString}
+        WHERE id=${id}
+        RETURNING *;
+        `,
+          Object.values(updatedPromoCode)
+        );
+  
+        return promoCode;
+      }
+        
     } catch (error) {
         console.error('Error updating promo code');
         throw error;
@@ -92,10 +94,28 @@ async function getPromoCodesByProductId(productId){
     }
 }
 
+async function getPromoCodesById(Id){
+    try {
+        const {rows: promo_codes } = await client.query(`
+        SELECT *
+        FROM promo_codes
+        WHERE id=$1
+        `, [Id]);
+
+        return promo_codes;
+
+    } catch (error) {
+        console.error('Error getting promo codes by Id');
+        throw error;
+    }
+}
+
+
 module.exports = {
     createPromoCode,
     getAllPromoCodes,
     updatePromoCode,
     deletePromoCode,
-    getPromoCodesByProductId
+    getPromoCodesByProductId,
+    getPromoCodesById
 };

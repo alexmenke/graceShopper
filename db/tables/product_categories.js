@@ -1,22 +1,25 @@
 const client = require('../client');
 
-async function createProductCategory ({productId, categoryId}) {
+async function createProductCategory (productCategory) {
     try {
-        const { rows: [productCategory] } = await client.query(`
-            INSERT INTO product_categories("productId", "categoryId")
-            VALUES ($1, $2)
-            RETURNING *;
-            `, [productId, categoryId])
+        const columnNames = Object.keys(productCategory).join('", "');
+        const valueString = Object.keys(productCategory).map((key, index) => `$${index + 1}`).join();
 
-            return productCategory;
+        const { rows: [newProductCategory] } = await client.query(`
+            INSERT INTO product_categories("${columnNames}")
+            VALUES (${valueString})
+            RETURNING *;
+            `, Object.values(productCategory))
+
+            return newProductCategory;
 
     } catch (error) {
         console.error("Error creating product category");
-        console.error(error);
+        throw error;
     }
 };
 
-async function getProductCategoryByProductId(productId){
+async function getProductCategoriesByProductId(productId){
     try {
         const {rows: [productCategory]} = await client.query(`
         SELECT *
@@ -28,11 +31,11 @@ async function getProductCategoryByProductId(productId){
 
     } catch (error) {
         console.error("Error getting product category by 'productId'");
-        console.error(error);
+        throw error;
     }
 };
 
-async function deleteProductCategoryByProductId (productId) {
+async function deleteProductCategoriesByProductId (productId) {
     try {
         const { rows: deletedProductCategory } = await client.query(`
         DELETE FROM product_categories
@@ -44,13 +47,49 @@ async function deleteProductCategoryByProductId (productId) {
 
     } catch (error) {
         console.error("Error deleting product category");
-        console.error(error);
+        throw error;
     }
 };
 
+async function deleteProductCategory (productId, categoryId) {
+    try {
+        const { rows: deletedProductCategory } = await client.query(`
+        DELETE FROM product_categories
+        WHERE "productId"=$1
+        AND "categoryId"=$2
+        RETURNING *;
+        `, [productId, categoryId]);
+
+        return deletedProductCategory;
+
+    } catch (error) {
+        console.error("Error deleting product category");
+        throw error;
+    }
+}
+
+async function getProductCategory (productId, categoryId) {
+    try {
+        const { rows: [productCategory] } = await client.query(`
+        SELECT *
+        FROM product_categories
+        WHERE "productId"=$1
+        AND "categoryId"=$2;
+        `, [productId, categoryId]);
+
+        return productCategory;
+
+    } catch (error) {
+        console.error("Error getting product category");
+        throw error;
+    }
+}
+
 module.exports = {
     createProductCategory,
-    getProductCategoryByProductId,
-    deleteProductCategoryByProductId
+    getProductCategoriesByProductId,
+    deleteProductCategoriesByProductId,
+    getProductCategory,
+    deleteProductCategory
 };
 

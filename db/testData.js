@@ -1,4 +1,5 @@
-const { faker, FakerError } = require('@faker-js/faker');
+const { faker } = require('@faker-js/faker');
+const axios = require('axios');
 
 const createFakeUser = async () => {
   const fakeUser = {
@@ -19,7 +20,7 @@ const createFakeProduct = async () => {
     name: faker.commerce.productName(),
     description: faker.commerce.productDescription(),
     price: faker.commerce.price(25, 1000, 2),
-    inventory: faker.datatype.number({ max: 100 }),
+    inventory: faker.datatype.number({ min: 20, max: 100 }),
   };
 
   return fakeProduct;
@@ -35,14 +36,10 @@ const createFakeProductReview = async () => {
 };
 const createFakeCartItem = async () => {
   const fakeCartItem = {
-    quantity: faker.datatype.number({ max: 10 }),
+    quantity: faker.datatype.number({ min: 1, max: 10 }),
   };
 
   return fakeCartItem;
-};
-
-const createFakeProductImage = async () => {
-  return faker.image.imageUrl(640, 480, 'toy');
 };
 
 const createFakeCategory = async () => {
@@ -55,8 +52,9 @@ const createFakeCategory = async () => {
 
 const createFakeOrderHistory = async () => {
   fakeOrderHistory = {
-    status: faker.helpers.fake('Status: Complete'),
+    status: faker.helpers.fake('Complete'),
     total: faker.commerce.price(25, 1000, 2),
+    dateOrdered: faker.date.between('2020-01-01', '2024-12-31'),
   };
 
   return fakeOrderHistory;
@@ -64,7 +62,7 @@ const createFakeOrderHistory = async () => {
 
 const createFakeOrderDetail = async () => {
   fakeOrderDetail = {
-    quantity: faker.datatype.number({ max: 10 }),
+    quantity: faker.datatype.number({ min: 1, max: 10 }),
     price: faker.commerce.price(25, 1000, 2),
   };
 
@@ -114,16 +112,21 @@ const generateFakeCartItems = async (numberOfItems = 1) => {
   return items;
 };
 
-const generateProductImages = async (numberOfImages = 1, productId) => {
-  if (productId) {
-    const images = [];
-    for (let i = 0; i < numberOfImages; i++) {
-      let imageURL = await createFakeProductImage();
-      images.push({ imageURL, productId });
+const generateProductImages = async productId => {
+  try {
+    if (productId) {
+      const response = await axios.get(`https://picsum.photos/seed/${productId}/200/300`);
+      if (response.status === 200) {
+        return { imageURL: `https://i.picsum.photos${response.request.path}`, productId };
+      } else {
+        console.error(`Error during the product image API request. Status code ${response.status}`);
+      }
+    } else {
+      console.error('Product ID missing for generateProductImages');
     }
-    return images;
-  } else {
-    console.error('Product ID missing for generateProductImages');
+  } catch (err) {
+    console.error('Error generating product image');
+    throw err;
   }
 };
 

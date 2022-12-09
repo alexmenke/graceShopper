@@ -1,4 +1,3 @@
-require('dotenv').config();
 const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');
@@ -12,7 +11,3 @@ app.use(express.json());
 app.use('/api', router);
 
 module.exports = app;
-// test
-// testing again
-// testing again again
-//testing for rachael branch to see pull request

@@ -1,81 +1,179 @@
 const client = require('../client');
+const { getProductById, updateProduct, hasSufficientProduct, getProductDetailsById } = require('./products');
+const { createOrderHistory } = require('./order_history');
+const { createOrderDetails } = require('./order_details');
 
-async function createUserCart({ userId, productId, quantity }) {
-    try {
-        const { rows: [user_cart] } = await client.query(`
+async function addItemToUserCart({ userId, productId, quantity }) {
+  try {
+    if (await hasSufficientProduct(productId, quantity)) {
+      const {
+        rows: [item],
+      } = await client.query(
+        `
             INSERT INTO user_cart("userId", "productId", quantity)
             VALUES ($1, $2, $3)
-            RETURNING *;
-        `, [userId, productId, quantity]);
+            RETURNING *;`,
+        [userId, productId, quantity]
+      );
 
-        return user_cart;
-
-    } catch (error) {
-        console.error('Error creating user cart');
-        console.error(error);
+      return item;
     }
-};
+  } catch (error) {
+    console.error('Error adding item to user cart');
+    throw error;
+  }
+}
 
-async function getUserCartByUserId(userId){
-    try {
-        const {rows: [user_cart]} = await client.query(`
-        SELECT *
-        FROM user_cart
-        WHERE "userId"=$1;
-        `, [userId]);
+async function getUserCartByUserId(userId) {
+  try {
+    const { rows: user_cart } = await client.query(
+      `
+        SELECT * FROM user_cart
+        WHERE "userId"=${userId};`
+    );
 
-        return user_cart;
+    return user_cart;
+  } catch (error) {
+    console.error("Error getting user cart by 'userId'");
+    throw error;
+  }
+}
 
-    } catch (error) {
-        console.error("Error getting user cart by 'userId'");
-        console.error(error);
+async function getUserCartDetailsByUserId(userId) {
+  try {
+    const { rows: user_cart } = await client.query(
+      `
+        SELECT * FROM user_cart
+        WHERE "userId"=${userId};`
+    );
+    const data = await Promise.all(
+      user_cart.map(async item => {
+        const product = await getProductDetailsById(item.productId);
+        product.orderedAmount = item.quantity;
+        return product;
+      })
+    );
+
+    return data;
+  } catch (error) {
+    console.error("Error getting user cart by 'userId'");
+    throw error;
+  }
+}
+
+async function updateUserCart({ userId, productId, quantity }) {
+  try {
+    const product = await getProductById(productId);
+    if (product.inventory < quantity) {
+      console.error('The quantity of item is greater than current inventory');
+    } else {
+      const {
+        rows: [updatedItem],
+      } = await client.query(`
+        UPDATE user_cart
+        SET quantity=${quantity}
+        WHERE "productId"=${productId} AND "userId"=${userId}
+        RETURNING *;`);
+
+      return updatedItem;
     }
-};
+  } catch (error) {
+    console.error('error updating product quantity in cart');
+    throw error;
+  }
+}
 
-async function updateUserCart({userId, ...fields}) {
-    const { update } = fields;
+async function deleteUserCartByUserId(userId) {
+  try {
+    const { rows: deletedUserCart } = await client.query(`
+      DELETE FROM user_cart
+      WHERE "userId"='${userId}'
+      RETURNING *;`);
 
-    const setString = Object.keys(fields)
-    .map((key, index) => `"${key}"=$${index + 1}`)
-    .join(", ");
+    return deletedUserCart;
+  } catch (error) {
+    console.error('Error deleting user cart');
+    throw error;
+  }
+}
 
-    try {
-        if(setString.length > 0){
-            await client.query(`
-            UPDATE user_cart
-            SET ${setString}
-            WHERE "userId"=${userId}
-            RETURNING *;
-            `, Object.values(fields));
-        }
-        if(update === undefined){
-            return await getUserCartById(userId);
-        }
-    } catch (error) {
-        console.error('Error updating user cart');
-        console.error(error);
+async function deleteUserCartByProductId({ userId, productId }) {
+  try {
+    const {
+      rows: [deletedItem],
+    } = await client.query(`
+      DELETE FROM user_cart
+      WHERE "productId"=${productId} AND "userId"=${userId}
+      RETURNING *;`);
+
+    return deletedItem;
+  } catch (error) {
+    console.error('Error deleting product from cart');
+    throw error;
+  }
+}
+
+async function submitUserCartByUserId(userId) {
+  try {
+    const usersCart = await getUserCartByUserId(userId);
+    if (usersCart && usersCart.length) {
+      const result = await Promise.all(usersCart.map(item => hasSufficientProduct(item.productId, item.quantity)));
+
+      if (!result.includes(false)) {
+        let total = 0;
+        const productList = await Promise.all(
+          usersCart.map(async item => {
+            const {
+              rows: [product],
+            } = await client.query(`
+              SELECT * FROM products
+              WHERE id=${item.productId};
+            `);
+
+            total += product.price * item.quantity;
+            const newInventory = product.inventory - item.quantity;
+            await updateProduct({ id: product.id, inventory: newInventory });
+
+            return { productId: product.id, quantity: item.quantity, price: product.price };
+          })
+        );
+
+        const order = await createOrderHistory({
+          userId,
+          status: 'Created',
+          total,
+          dateOrdered: new Date().toLocaleDateString(),
+        });
+
+        await Promise.all(
+          productList.map(async product => {
+            await createOrderDetails({ orderId: order.id, ...product });
+          })
+        );
+
+        await deleteUserCartByUserId(userId);
+      } else {
+        console.error('Unable to submit order, insufficient product');
+        throw 'Unable to submit order, insufficient product';
+      }
+    } else {
+      console.error('Unable to submit order, cart empty');
+      throw 'Unable to submit order, cart empty';
     }
-};
-
-async function deleteCartByUserId(userId) {
-    try {
-        const { rows: deletedUserCart } = await client.query(`
-            DELETE FROM user_cart
-            WHERE "userId"=$1
-            RETURNING *;
-        `, [userId]);
-
-        return deletedUserCart;
-
-    } catch (error) {
-        console.error('Error deleting user cart');
-        console.error(error);
-    }
-};
+  } catch (error) {
+    console.error('Error submitting user cart by user id');
+    throw error;
+  } finally {
+    console.log('Order completed');
+  }
+}
 
 module.exports = {
-    createUserCart,
-    getUserCartByUserId,
-    updateUserCart,
-    deleteCartByUserId
+  addItemToUserCart,
+  getUserCartByUserId,
+  getUserCartDetailsByUserId,
+  updateUserCart,
+  deleteUserCartByUserId,
+  deleteUserCartByProductId,
+  submitUserCartByUserId,
 };

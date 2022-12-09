@@ -1,12 +1,11 @@
 const client = require('../client');
 const bcrypt = require('bcrypt');
-const { getUserCartByUserId } = './user_cart.js'
-const {getOrderHistoryByUserId } = './order_history.js'
-const { getProductReviewsByUserId } = './product_reviews.js'
-const { getUserWishlistByUserId } = './user_wishlist.js'
+const { buildUserCartObj, deleteUserCartByUserId, getUserCartDetailsByUserId } = require('./user_cart');
+const { getOrderHistoryByUserId, deleteOrderHistoriesByUserId } = require('./order_history');
+const { getProductReviewsByUserId, deleteProductReviewsByUserId } = require('./product_reviews');
+const { getUserWishlistByUserId, deleteUserWishlistByUserId } = require('./user_wishlist');
 
-
-const createUser = async user => {
+async function createUser(user) {
   try {
     const SALT_COUNT = 10;
     const hashedPassword = await bcrypt.hash(user.password, SALT_COUNT);
@@ -28,65 +27,75 @@ const createUser = async user => {
       Object.values(user)
     );
 
+    delete user.password;
     return newUser;
   } catch (error) {
-    console.error('error creating user')
-    throw error;
-  }
-};
-
-async function buildUserObject (user) {
-  try {
-
-    user.userCart = await getUserCartByUserId(user.id)
-    user.orderHistory = await getOrderHistoryByUserId(user.id)
-    user.productReviews = await getProductReviewsByUserId(user.id)
-    user.userWishlist = await getUserWishlistByUserId(user.id)
-
-    return user
-
-  } catch (error) {
-    console.error('error building user Object')
+    console.error('Error creating user');
     throw error;
   }
 }
 
-async function getAllUsers () {
+async function buildUserObject(user) {
+  try {
+    const userCart = await getUserCartDetailsByUserId(user.id);
+    if (userCart && userCart.length) {
+      user.userCart = userCart;
+    }
+
+    const orderHistory = await getOrderHistoryByUserId(user.id);
+    if (orderHistory && orderHistory.length) {
+      user.orderHistory = orderHistory;
+    }
+
+    const productReviews = await getProductReviewsByUserId(user.id);
+    if (productReviews && productReviews.length) {
+      user.productReviews = productReviews;
+    }
+
+    const userWishlist = await getUserWishlistByUserId(user.id);
+    if (userWishlist && userWishlist.length) {
+      user.userWishlist = userWishlist;
+    }
+
+    return user;
+  } catch (error) {
+    console.error('Error building user object');
+    throw error;
+  }
+}
+
+async function getAllUsers() {
   try {
     const { rows: users } = await client.query(` 
       SELECT * FROM users;`);
 
-      users.forEach(user => delete user.password)
+    users.forEach(user => delete user.password);
 
-      return users;
-
-
+    return users;
   } catch (error) {
-    console.error('error getting all users')
+    console.error('Error getting all users');
     throw error;
   }
 }
 
-async function getUser({ username, password }) {
+async function loginUser({ username, password }) {
   try {
-    const _user = await getUserByUsername(username);
+    const {
+      rows: [user],
+    } = await client.query(`
+      SELECT * 
+      FROM users
+      WHERE username='${username}';
+    `);
 
-    const hashedPassword = _user.password;
-    const isValid = await bcrypt.compare(password, hashedPassword);
+    if (user) {
+      const hashedPassword = user.password;
+      const isValid = await bcrypt.compare(password, hashedPassword);
 
-    if (isValid) {
-      const {
-        rows: [user]} = await client.query(` 
-				SELECT * FROM users
-				WHERE password = '${hashedPassword}' AND username='${username}';`);
-
-      delete user.password;
-
-      return await buildUserObject(user);
-
-    } else {
-      console.log('Username or password incorrect');
-      throw 'Username or password incorrect';
+      if (isValid) {
+        delete user.password;
+        return await buildUserObject(user);
+      }
     }
   } catch (error) {
     console.error(error);
@@ -94,22 +103,18 @@ async function getUser({ username, password }) {
   }
 }
 
-
 async function getUserById(userId) {
   try {
     const {
-      rows: [user]} = await client.query(` 
-			SELECT * FROM users
-			WHERE id = ${userId}
-	  `);
-    if (!user) {
-      console.error('User not found');
-      throw 'User not found';
+      rows: [user],
+    } = await client.query(` 
+      SELECT * FROM users
+      WHERE id = ${userId};`);
+
+    if (user) {
+      delete user.password;
+      return await buildUserObject(user);
     }
-
-    delete user.password;
-
-    return user;
   } catch (error) {
     console.error(error);
     throw error;
@@ -118,25 +123,44 @@ async function getUserById(userId) {
 
 async function getUserByUsername(username) {
   try {
-    const { rows: [user]} = await client.query(` 
-			SELECT * 
-      FROM users
-			WHERE username=$1;
-	  `, [username]);
+    const {
+      rows: [user],
+    } = await client.query(` 
+      SELECT * FROM users
+      WHERE username='${username}';`);
 
-    if (!user) {
-      console.error('User not found');
-      throw 'User not found';
+    if (user) {
+      delete user.password;
+      return await buildUserObject(user);
     }
-
-    return user;
   } catch (error) {
     console.error('error getting user by username');
     throw error;
   }
 }
 
-async function updateUser(id, fields = {}) {
+async function checkIfUserExists(username, email) {
+  try {
+    const {
+      rows: [user],
+    } = await client.query(
+      `
+      SELECT username, email
+      FROM users
+      WHERE username=$1
+      OR email=$2;
+    `,
+      [username, email]
+    );
+
+    return user;
+  } catch (error) {
+    console.error('Error checking if user exists');
+    throw error;
+  }
+}
+
+async function updateUserById(id, fields = {}) {
   const updatedColumns = Object.keys(fields)
     .map((key, index) => `"${key}"=$${index + 1}`)
     .join(', ');
@@ -147,7 +171,8 @@ async function updateUser(id, fields = {}) {
 
   try {
     const {
-      rows: [user]} = await client.query(
+      rows: [user],
+    } = await client.query(
       `
       UPDATE users
       SET ${updatedColumns}
@@ -156,33 +181,47 @@ async function updateUser(id, fields = {}) {
       Object.values(fields)
     );
 
-    return user;
+    if (user) {
+      delete user.password;
+      return await buildUserObject(user);
+    }
   } catch (error) {
     console.error('Error updating User');
     throw error;
   }
 }
 
-async function deleteUser(id) {
+async function deleteUserById(userId) {
   try {
-    const { rows: [user]} = await client.query(`
-	  	DELETE FROM users WHERE users.id = ${id}
-	 		RETURNING *;`);
+    const user = await getUserById(userId);
+    if (user) {
+      await deleteUserCartByUserId(user.id);
+      await deleteUserWishlistByUserId(user.id);
+      await deleteOrderHistoriesByUserId(user.id);
+      await deleteProductReviewsByUserId(user.id);
 
-    return user;
+      await client.query(`
+        DELETE FROM users
+        WHERE id='${user.id}';`);
+
+      return user;
+    } else {
+      console.error('User not found');
+      throw 'User not found';
+    }
   } catch (error) {
-    console.error('Error deleting User');
+    console.error('Error deleting user');
     throw error;
   }
 }
 
-
 module.exports = {
   createUser,
-  getUser,
+  loginUser,
   getUserByUsername,
   getUserById,
-  updateUser,
-  deleteUser,
-  getAllUsers
+  updateUserById,
+  deleteUserById,
+  getAllUsers,
+  checkIfUserExists,
 };
